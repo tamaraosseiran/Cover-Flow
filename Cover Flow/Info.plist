@@ -6,5 +6,16 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>coverflow</string>
+			</array>
+			<key>CFBundleURLName</key>
+			<string>com.yourdomain.coverflow</string>
+		</dict>
+	</array>
 </dict>
 </plist>
