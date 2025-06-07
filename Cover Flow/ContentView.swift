@@ -231,7 +231,7 @@ struct CoverFlowView: View {
                         let tilt = isFocused ? Double(dragOffset / 12).clamped(to: -maxTilt...maxTilt) : rotation
                         let parallax = isFocused ? (dragOffset / 4).clamped(to: -maxParallax...maxParallax) : 0
                         let anchor: UnitPoint = .center
-                        AlbumCoverView(album: albums[index], parallax: parallax)
+                        AlbumCoverView(album: albums[index], parallax: parallax, isFocused: isFocused)
                             .frame(width: itemWidth, height: 200)
                             .scaleEffect(scale)
                             .opacity(opacity)
@@ -326,34 +326,98 @@ fileprivate extension Comparable {
 struct AlbumCoverView: View {
     let album: Album
     var parallax: CGFloat = 0
+    var isFocused: Bool = false
+    // For interactive tilt
+    @State private var dragOffset: CGSize = .zero
+    @GestureState private var isDragging: Bool = false
     
     var body: some View {
+        let maxTilt: Double = 15
+        let dragScale: CGFloat = isDragging ? 1.03 : 1.0
+        let totalScale = dragScale
+        let xTilt = Double(dragOffset.width / 60).clamped(to: -maxTilt...maxTilt)
+        let yTilt = Double(-dragOffset.height / 60).clamped(to: -maxTilt...maxTilt)
         ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.gray.opacity(0.3))
-                .shadow(radius: 10)
-            
-            if album.coverImage.hasPrefix("http") {
-                AsyncImage(url: URL(string: album.coverImage)) { image in
-                    image
+            // Shadow and border for depth
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(isFocused ? 0.18 : 0.08))
+                .shadow(color: Color.black.opacity(isFocused ? 0.45 : 0.18), radius: isFocused ? 24 : 8, x: 0, y: isFocused ? 12 : 4)
+            // Album art
+            Group {
+                if album.coverImage.hasPrefix("http") {
+                    AsyncImage(url: URL(string: album.coverImage)) { image in
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .offset(x: parallax)
+                            .animation(.easeOut(duration: 0.2), value: parallax)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } placeholder: {
+                        ProgressView()
+                    }
+                    .padding(0)
+                } else {
+                    Image(systemName: album.coverImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .offset(x: parallax)
                         .animation(.easeOut(duration: 0.2), value: parallax)
-                } placeholder: {
-                    ProgressView()
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(0)
+                        .foregroundColor(.white)
                 }
-                .padding()
-            } else {
-                Image(systemName: album.coverImage)
+            }
+            // Shine effect when focused and tilted
+            if isFocused {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: Color.white.opacity(0.2), location: 0.0),
+                                .init(color: Color.white.opacity(0.1), location: 0.45),
+                                .init(color: Color.clear, location: 0.7)
+                            ]),
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .allowsHitTesting(false)
+            }
+            // Grain overlay
+            if isFocused {
+                Image("noiseOverlay")
                     .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .offset(x: parallax)
-                    .animation(.easeOut(duration: 0.2), value: parallax)
-                    .padding()
-                    .foregroundColor(.white)
+                    .scaledToFill()
+                    .opacity(0.13)
+                    .blendMode(.overlay)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scaleEffect(totalScale)
+        .rotation3DEffect(
+            .degrees(xTilt),
+            axis: (x: 0, y: 1, z: 0), anchor: .center
+        )
+        .rotation3DEffect(
+            .degrees(yTilt),
+            axis: (x: 1, y: 0, z: 0), anchor: .center
+        )
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: isFocused)
+        .animation(.easeOut(duration: 0.2), value: dragOffset)
+        .gesture(
+            isFocused ? DragGesture(minimumDistance: 0)
+                .updating($isDragging) { _, state, _ in state = true }
+                .onChanged { value in
+                    dragOffset = value.translation
+                }
+                .onEnded { _ in
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                        dragOffset = .zero
+                    }
+                }
+            : nil
+        )
     }
 }
 
@@ -441,17 +505,17 @@ struct WaveformScrubberBar: View {
                             if isCenter {
                                 return .white
                             } else {
-                                return Color.gray.opacity(0.18 + 0.52 * whiteness)
+                                return Color.gray.opacity(0.3 + 0.5 * whiteness)
                             }
                         } else {
-                            return Color.gray.opacity(0.18)
+                            return Color.gray.opacity(0.3)
                         }
                     }()
                     Rectangle()
                         .fill(color)
                         .frame(width: barWidth, height: height)
                         .cornerRadius(1)
-                        .shadow(color: isCenter && isActive ? Color.white.opacity(0.7) : .clear, radius: isCenter ? 6 : 0, x: 0, y: 0)
+                        .shadow(color: isCenter && isActive ? Color.white.opacity(0.8) : .clear, radius: isCenter ? 8 : 0, x: 0, y: 0)
                         .scaleEffect(isCenter && (showLabel || isHighlightActive) ? 1.2 : 1.0, anchor: .bottom)
                         .animation(.spring(response: 2.0, dampingFraction: 0.8), value: highlightBar)
                         .contentShape(Rectangle())
