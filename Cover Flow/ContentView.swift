@@ -55,6 +55,23 @@ struct ContentView: View {
             
             Color.black.opacity(0.3).ignoresSafeArea()
             
+            // Add a dark gradient overlay at the bottom for contrast
+            VStack {
+                Spacer()
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: .clear, location: 0.0),
+                        .init(color: Color.black.opacity(0.0), location: 0.5),
+                        .init(color: Color.black.opacity(0.18), location: 0.85),
+                        .init(color: Color.black.opacity(0.24), location: 1.0)
+                    ]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .ignoresSafeArea(edges: .bottom)
+            }
+            
             VStack(spacing: 0) {
                 if spotifyService.isLoading {
                     ProgressView()
@@ -330,70 +347,79 @@ struct AlbumCoverView: View {
     // For interactive tilt
     @State private var dragOffset: CGSize = .zero
     @GestureState private var isDragging: Bool = false
+    @State private var viewSize: CGSize = .zero
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.modelContext) private var modelContext
+    @State private var dominantColor: Color = .white
+    @State private var albumColors: [String: UIImageColors] = [:]
     
     var body: some View {
         let maxTilt: Double = 15
         let dragScale: CGFloat = isDragging ? 1.03 : 1.0
         let totalScale = dragScale
-        let xTilt = Double(dragOffset.width / 60).clamped(to: -maxTilt...maxTilt)
-        let yTilt = Double(-dragOffset.height / 60).clamped(to: -maxTilt...maxTilt)
+        // Normalize drag offset to [-1, 1] based on view size
+        let normX: Double = viewSize.width > 0 ? Double((dragOffset.width / (viewSize.width / 2)).clamped(to: -1...1)) : 0
+        let normY: Double = viewSize.height > 0 ? Double((dragOffset.height / (viewSize.height / 2)).clamped(to: -1...1)) : 0
+        let xTilt = normX * maxTilt
+        let yTilt = -normY * maxTilt
+        // Calculate glow position and intensity
+        let glowStrength = min(1.0, sqrt(normX * normX + normY * normY))
+        let glowOffsetX = CGFloat(normX) * 60
+        let glowOffsetY = CGFloat(normY) * 60
+        // Use albumColors if available, else fallback to white
+        let glowColor: Color = .white
         ZStack {
-            // Shadow and border for depth
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.black.opacity(isFocused ? 0.18 : 0.08))
-                .shadow(color: Color.black.opacity(isFocused ? 0.45 : 0.18), radius: isFocused ? 24 : 8, x: 0, y: isFocused ? 12 : 4)
-            // Album art
+            // Album art only, no border/overlay
             Group {
                 if album.coverImage.hasPrefix("http") {
                     AsyncImage(url: URL(string: album.coverImage)) { image in
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .offset(x: parallax)
-                            .animation(.easeOut(duration: 0.2), value: parallax)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .aspectRatio(contentMode: .fill)
+                            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                            .opacity(1.0)
                     } placeholder: {
                         ProgressView()
                     }
-                    .padding(0)
                 } else {
                     Image(systemName: album.coverImage)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .offset(x: parallax)
-                        .animation(.easeOut(duration: 0.2), value: parallax)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding(0)
+                        .aspectRatio(contentMode: .fill)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .foregroundColor(.white)
+                        .opacity(1.0)
                 }
             }
-            // Shine effect when focused and tilted
+            // Dynamic color-matched glow overlay
             if isFocused {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(stops: [
-                                .init(color: Color.white.opacity(0.2), location: 0.0),
-                                .init(color: Color.white.opacity(0.1), location: 0.45),
-                                .init(color: Color.clear, location: 0.7)
-                            ]),
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .allowsHitTesting(false)
-            }
-            // Grain overlay
-            if isFocused {
-                Image("noiseOverlay")
-                    .resizable()
-                    .scaledToFill()
-                    .opacity(0.13)
-                    .blendMode(.overlay)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .allowsHitTesting(false)
+                RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: glowColor.opacity(0.32 * glowStrength + 0.08), location: 0.0),
+                        .init(color: glowColor.opacity(0.12 * glowStrength), location: 0.6),
+                        .init(color: .clear, location: 1.0)
+                    ]),
+                    center: .center,
+                    startRadius: 40,
+                    endRadius: 220
+                )
+                .blur(radius: 16)
+                .blendMode(.plusLighter)
+                .offset(x: glowOffsetX, y: glowOffsetY)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .allowsHitTesting(false)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(width: 240, height: 240)
+        .shadow(color: Color.black.opacity(0.22), radius: 32, x: 0, y: 8)
+        .overlay(
+            LinearGradient(
+                gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.18)]),
+                startPoint: .center,
+                endPoint: .bottom
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        )
         .scaleEffect(totalScale)
         .rotation3DEffect(
             .degrees(xTilt),
@@ -405,6 +431,13 @@ struct AlbumCoverView: View {
         )
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: isFocused)
         .animation(.easeOut(duration: 0.2), value: dragOffset)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { viewSize = geo.size }
+                    .onChange(of: geo.size) { _, newSize in viewSize = newSize }
+            }
+        )
         .gesture(
             isFocused ? DragGesture(minimumDistance: 0)
                 .updating($isDragging) { _, state, _ in state = true }
@@ -412,12 +445,27 @@ struct AlbumCoverView: View {
                     dragOffset = value.translation
                 }
                 .onEnded { _ in
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                    withAnimation(.interpolatingSpring(stiffness: 180, damping: 18)) {
                         dragOffset = .zero
                     }
                 }
             : nil
         )
+        // Move album down to avoid notch
+        .padding(.top, 32)
+        .onAppear {
+            // Try to extract album color if not already present
+            if albumColors[album.coverImage] == nil,
+               let url = URL(string: album.coverImage), album.coverImage.hasPrefix("http") {
+                URLSession.shared.dataTask(with: url) { data, _, _ in
+                    guard let data = data, let image = UIImage(data: data) else { return }
+                    let colors = image.getColors()
+                    DispatchQueue.main.async {
+                        albumColors[album.coverImage] = colors
+                    }
+                }.resume()
+            }
+        }
     }
 }
 
