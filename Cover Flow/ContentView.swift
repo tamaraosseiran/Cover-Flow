@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIImageColors
 
 @Model
 final class Album {
@@ -32,16 +33,27 @@ struct ContentView: View {
     @State private var scrubberActiveTask: DispatchWorkItem?
     @State private var scrubberHighlightOffset: Int = 0
     @State private var scrubberHighlightResetTask: DispatchWorkItem?
+    @State private var albumColors: [String: UIImageColors] = [:]
 
     var body: some View {
         ZStack {
-            // Background gradient
+            // Dynamic background gradient
+            let gradientColors: [Color] = {
+                if let selected = selectedAlbum, let colors = albumColors[selected.coverImage] {
+                    return [Color(colors.background), Color(colors.primary)]
+                } else {
+                    return [Color.black.opacity(0.8), Color.black]
+                }
+            }()
             LinearGradient(
-                colors: [Color.black.opacity(0.8), Color.black],
+                colors: gradientColors,
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .animation(.easeInOut(duration: 0.7), value: gradientColors)
             .ignoresSafeArea()
+            
+            Color.black.opacity(0.3).ignoresSafeArea()
             
             VStack(spacing: 0) {
                 if spotifyService.isLoading {
@@ -89,10 +101,10 @@ struct ContentView: View {
                                 .foregroundColor(.white)
                             Text(selected.artist)
                                 .font(.title2)
-                                .foregroundColor(.gray)
-                            Text("\(selected.year)")
+                                .foregroundColor(.white.opacity(0.7))
+                            Text(String(selected.year))
                                 .font(.subheadline)
-                                .foregroundColor(.gray)
+                                .foregroundColor(.white.opacity(0.7))
                         }
                     } else {
                         VStack { Text(" ") }
@@ -140,6 +152,10 @@ struct ContentView: View {
                 print("[DEBUG] After fetch. Album count: \(spotifyService.albums.count)")
             }
         }
+        .onChange(of: selectedAlbum) { _, newValue in
+            guard let album = newValue else { return }
+            extractColors(for: album)
+        }
     }
     
     // Helper to activate and auto-idle the scrubber
@@ -166,6 +182,19 @@ struct ContentView: View {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             scrubberHighlightOffset = direction.clamped(to: -5...5)
         }
+    }
+    
+    // Extract colors from album cover image if not already cached
+    private func extractColors(for album: Album) {
+        guard albumColors[album.coverImage] == nil,
+              let url = URL(string: album.coverImage), album.coverImage.hasPrefix("http") else { return }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data, let image = UIImage(data: data) else { return }
+            let colors = image.getColors()
+            DispatchQueue.main.async {
+                albumColors[album.coverImage] = colors
+            }
+        }.resume()
     }
 }
 
@@ -390,15 +419,13 @@ struct WaveformScrubberBar: View {
             let idx = firstAlbumIndex + bar
             return min(max(idx, 0), count - 1)
         }
+        let minHeight = isActive ? activeMinHeight : idleMinHeight
+        let maxHeight = isActive ? activeMaxHeight : idleMaxHeight
+        let minWidth = isActive ? activeMinWidth : idleMinWidth
+        let maxWidth = isActive ? activeMaxWidth : idleMaxWidth
         GeometryReader { geo in
             let width = geo.size.width
             let barSpacing = width / CGFloat(barCount)
-            let minHeight = isActive ? activeMinHeight : idleMinHeight
-            let maxHeight = isActive ? activeMaxHeight : idleMaxHeight
-            let minOpacity = isActive ? activeMinOpacity : idleMinOpacity
-            let maxOpacity = isActive ? activeMaxOpacity : idleMaxOpacity
-            let minWidth = isActive ? activeMinWidth : idleMinWidth
-            let maxWidth = isActive ? activeMaxWidth : idleMaxWidth
             ZStack(alignment: .bottomLeading) {
                 ForEach(0..<barCount, id: \ .self) { bar in
                     let albumIndex = barToAlbumIndex[bar]

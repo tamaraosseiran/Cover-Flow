@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		01B0B2CF2DF3FFB0005B6198 /* UIImageColors in Frameworks */ = {isa = PBXBuildFile; productRef = 01B0B2CE2DF3FFB0005B6198 /* UIImageColors */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		01B0B2AE2DF38422005B6198 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				01B0B2CF2DF3FFB0005B6198 /* UIImageColors in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +130,7 @@
 			);
 			name = "Cover Flow";
 			packageProductDependencies = (
+				01B0B2CE2DF3FFB0005B6198 /* UIImageColors */,
 			);
 			productName = "Cover Flow";
 			productReference = 01B0B2992DF38421005B6198 /* Cover Flow.app */;
@@ -208,6 +214,9 @@
 			);
 			mainGroup = 01B0B2902DF38421005B6198;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				01B0B2CD2DF3FEED005B6198 /* XCRemoteSwiftPackageReference "UIImageColors" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 01B0B29A2DF38421005B6198 /* Products */;
 			projectDirPath = "";
@@ -575,6 +584,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		01B0B2CD2DF3FEED005B6198 /* XCRemoteSwiftPackageReference "UIImageColors" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jathu/UIImageColors";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		01B0B2CE2DF3FFB0005B6198 /* UIImageColors */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01B0B2CD2DF3FEED005B6198 /* XCRemoteSwiftPackageReference "UIImageColors" */;
+			productName = UIImageColors;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 01B0B2912DF38421005B6198 /* Project object */;
 }
