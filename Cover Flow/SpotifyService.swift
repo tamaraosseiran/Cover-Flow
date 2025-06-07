@@ -71,9 +71,9 @@ class SpotifyService: ObservableObject {
                     allAlbums.append(contentsOf: albums)
                 }
             }
-            // Shuffle and limit to 100
+            // Shuffle and limit to 30
             allAlbums.shuffle()
-            self.albums = Array(allAlbums.prefix(100))
+            self.albums = Array(allAlbums.prefix(30))
             print("[DEBUG] Total albums loaded: \(self.albums.count)")
         } catch {
             print("Error fetching indie rock albums: \(error)")
