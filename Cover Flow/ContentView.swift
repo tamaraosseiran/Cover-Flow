@@ -32,7 +32,7 @@ struct ContentView: View {
     @State private var scrubberActiveTask: DispatchWorkItem?
     @State private var scrubberHighlightOffset: Int = 0
     @State private var scrubberHighlightResetTask: DispatchWorkItem?
-    
+
     var body: some View {
         ZStack {
             // Background gradient
@@ -108,6 +108,12 @@ struct ContentView: View {
                     albums: spotifyService.albums,
                     selectedIndex: selectedAlbum.flatMap { album in spotifyService.albums.firstIndex(where: { $0.id == album.id }) } ?? 0,
                     onSelect: { index in
+                        // Calculate the offset between the selected album and the center bar
+                        let centerBar = 25 / 2 // barCount is 25
+                        let offset = index - centerBar
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            scrubberHighlightOffset = offset.clamped(to: -5...5)
+                        }
                         NotificationCenter.default.post(name: .scrubberJumpToIndex, object: index)
                         activateScrubber()
                     },
@@ -146,24 +152,20 @@ struct ContentView: View {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 isScrubberActive = false
             }
+            // After scrubber is inactive, animate highlight back to center
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                scrubberHighlightOffset = 0
+            }
         }
         scrubberActiveTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: task)
     }
     
-    // Update highlight offset and reset after delay
+    // Update highlight offset only in response to user interaction
     private func updateScrubberHighlightOffset(_ direction: Int) {
-        scrubberHighlightResetTask?.cancel()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
             scrubberHighlightOffset = direction.clamped(to: -5...5)
         }
-        let task = DispatchWorkItem {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                scrubberHighlightOffset = 0
-            }
-        }
-        scrubberHighlightResetTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: task)
     }
 }
 
@@ -401,16 +403,28 @@ struct WaveformScrubberBar: View {
                 ForEach(0..<barCount, id: \ .self) { bar in
                     let albumIndex = barToAlbumIndex[bar]
                     let dist = abs(bar - highlightBar)
-                    let norm = min(Double(dist) / Double(barCount), 1.0)
-                    let height = minHeight + (maxHeight - minHeight) * CGFloat(1.0 - norm * norm)
-                    let opacity = minOpacity + (maxOpacity - minOpacity) * (1.0 - norm)
+                    let waveSpread = 6.0
+                    let norm = min(Double(dist) / waveSpread, 1.0)
+                    let height = minHeight + (maxHeight - minHeight) * CGFloat(1.0 - pow(norm, 2.5))
                     let isCenter = bar == highlightBar
                     let barWidth = isCenter ? maxWidth : minWidth
+                    let whiteness = 1.0 - pow(norm, 2.5) // sharper falloff for color too
+                    let color: Color = {
+                        if isActive {
+                            if isCenter {
+                                return .white
+                            } else {
+                                return Color.gray.opacity(0.18 + 0.52 * whiteness)
+                            }
+                        } else {
+                            return Color.gray.opacity(0.18)
+                        }
+                    }()
                     Rectangle()
-                        .fill(isCenter ? Color.white : Color.white.opacity(opacity))
+                        .fill(color)
                         .frame(width: barWidth, height: height)
                         .cornerRadius(1)
-                        .shadow(color: isCenter ? Color.white.opacity(0.7) : .clear, radius: isCenter ? 6 : 0, x: 0, y: 0)
+                        .shadow(color: isCenter && isActive ? Color.white.opacity(0.7) : .clear, radius: isCenter ? 6 : 0, x: 0, y: 0)
                         .scaleEffect(isCenter && (showLabel || isHighlightActive) ? 1.2 : 1.0, anchor: .bottom)
                         .animation(.spring(response: 2.0, dampingFraction: 0.8), value: highlightBar)
                         .contentShape(Rectangle())
@@ -460,30 +474,6 @@ struct WaveformScrubberBar: View {
                             }
                         }
                 )
-                // Floating label
-                if showLabel, highlightBar < barToAlbumIndex.count {
-                    let albumIndex = barToAlbumIndex[highlightBar]
-                    let barX = CGFloat(highlightBar) * barSpacing + barSpacing / 2
-                    VStack(spacing: 0) {
-                        if albumIndex < albums.count {
-                            Text(albums[albumIndex].title)
-                                .font(.caption.bold())
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule().fill(Color.black.opacity(0.85))
-                                )
-                                .matchedGeometryEffect(id: "label", in: labelNamespace)
-                        }
-                        Triangle()
-                            .fill(Color.black.opacity(0.85))
-                            .frame(width: 12, height: 6)
-                    }
-                    .position(x: barX, y: maxHeight - 32)
-                    .transition(.opacity.combined(with: .scale))
-                    .zIndex(10)
-                }
             }
         }
     }
