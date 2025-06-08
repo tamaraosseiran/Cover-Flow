@@ -37,6 +37,8 @@ struct ContentView: View {
     @State private var animateGradient = false
     @State private var gradientAngle: Double = 0
     @State private var albumTilt: CGSize = .zero
+    @State private var isRapidTransition = false
+    @State private var rapidTransitionTask: DispatchWorkItem?
 
     var body: some View {
         ZStack {
@@ -118,47 +120,59 @@ struct ContentView: View {
                         )
                         .frame(height: 350)
                         // Album info close below the album cover
-                        if let selected = selectedAlbum {
-                            VStack(spacing: 8) {
-                                Text(selected.title.replacingOccurrences(of: "\\s*\\([^)]*\\)", with: "", options: .regularExpression))
-                                    .font(.title)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                    .multilineTextAlignment(.center)
-                                Text(selected.artist)
-                                    .font(.title2)
-                                    .foregroundColor(.white.opacity(0.7))
-                                Text(String(selected.year))
-                                    .font(.subheadline)
-                                    .foregroundColor(.white.opacity(0.7))
+                        ZStack {
+                            if let selected = selectedAlbum {
+                                VStack(spacing: 8) {
+                                    Text(selected.title.replacingOccurrences(of: "\\s*\\([^)]*\\)", with: "", options: .regularExpression))
+                                        .font(.title)
+                                        .fontWeight(.bold)
+                                        .foregroundColor(.white)
+                                        .lineLimit(1)
+                                        .multilineTextAlignment(.center)
+                                    Text(selected.artist)
+                                        .font(.title2)
+                                        .foregroundColor(.white.opacity(0.7))
+                                    Text(String(selected.year))
+                                        .font(.subheadline)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                                .padding(.top, 6)
+                                .id(selected.year)
+                                .transition(.opacity)
+                                .animation(.easeInOut(duration: 0.25), value: selected.year)
+                                .blur(radius: isRapidTransition ? 8 : 0)
+                                .opacity(isRapidTransition ? 0.2 : 1.0)
                             }
-                            .padding(.top, 6)
                         }
+                        .frame(height: 100)
                     }
                 }
                 Spacer()
-                // Scrubber bar (always visible, animates between idle and active)
-                WaveformScrubberBar(
-                    albums: spotifyService.albums,
-                    selectedIndex: selectedAlbum.flatMap { album in spotifyService.albums.firstIndex(where: { $0.id == album.id }) } ?? 0,
-                    onSelect: { index in
-                        NotificationCenter.default.post(name: .scrubberJumpToIndex, object: index)
-                        activateScrubber()
-                    },
-                    onUserInteraction: {
-                        activateScrubber()
-                    },
-                    isActive: isScrubberActive
-                )
-                .frame(height: 24)
-                .padding(.horizontal, 16)
+                HStack {
+                    WaveformScrubberBar(
+                        albums: spotifyService.albums,
+                        selectedIndex: selectedAlbum.flatMap { album in spotifyService.albums.firstIndex(where: { $0.id == album.id }) } ?? 0,
+                        onSelect: { index in
+                            NotificationCenter.default.post(name: .scrubberJumpToIndex, object: index)
+                            activateScrubber()
+                        },
+                        onUserInteraction: {
+                            activateScrubber()
+                        },
+                        isActive: isScrubberActive,
+                        isRapidTransition: isRapidTransition,
+                        onRapidScrub: { handleRapidTransition() }
+                    )
+                    .frame(height: 24)
+                    .padding(.horizontal, 24)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.3)
+                            .onEnded { _ in activateScrubber() }
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.bottom, 32)
-                .contentShape(Rectangle())
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.3)
-                        .onEnded { _ in activateScrubber() }
-                )
             }
             .ignoresSafeArea(edges: .bottom)
         }
@@ -184,6 +198,7 @@ struct ContentView: View {
     
     // Helper to activate and auto-idle the scrubber
     private func activateScrubber() {
+        if isScrubberActive { return }
         scrubberActiveTask?.cancel()
         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
             isScrubberActive = true
@@ -215,6 +230,21 @@ struct ContentView: View {
                 albumColors[album.coverImage] = colors
             }
         }.resume()
+    }
+    
+    // Add this function near your other helper functions
+    private func handleRapidTransition() {
+        rapidTransitionTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.1)) {
+            isRapidTransition = true
+        }
+        let task = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isRapidTransition = false
+            }
+        }
+        rapidTransitionTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: task)
     }
 }
 
@@ -513,19 +543,21 @@ struct WaveformScrubberBar: View {
     let onSelect: (Int) -> Void
     var onUserInteraction: (() -> Void)? = nil
     var isActive: Bool = false
+    var isRapidTransition: Bool = false
+    var onRapidScrub: (() -> Void)? = nil
     private let barCount: Int = 28
     private let idleMinHeight: CGFloat = 16
     private let idleMaxHeight: CGFloat = 18
     private let idleMinOpacity: Double = 0.12
     private let idleMaxOpacity: Double = 0.22
-    private let idleMinWidth: CGFloat = 2
-    private let idleMaxWidth: CGFloat = 3
+    private let idleMinWidth: CGFloat = 1
+    private let idleMaxWidth: CGFloat = 1
     private let activeMinHeight: CGFloat = 20
     private let activeMaxHeight: CGFloat = 22
     private let activeMinOpacity: Double = 0.22
     private let activeMaxOpacity: Double = 0.7
-    private let activeMinWidth: CGFloat = 2.5
-    private let activeMaxWidth: CGFloat = 3.5
+    private let activeMinWidth: CGFloat = 1.5
+    private let activeMaxWidth: CGFloat = 1.5
     @GestureState private var dragBar: Int? = nil
     @State private var dragActiveBar: Int? = nil
     @State private var animatingToCenter = false
@@ -547,7 +579,7 @@ struct WaveformScrubberBar: View {
         let maxWidth = isActive ? activeMaxWidth : idleMaxWidth
         GeometryReader { geo in
             let width = geo.size.width
-            let barSpacing = width / CGFloat(barCount - 1)
+            let barSpacing = width / CGFloat(barCount)
             ZStack(alignment: .bottomLeading) {
                 ForEach(0..<barCount, id: \ .self) { bar in
                     let albumIndex = barToAlbumIndex[bar]
@@ -596,10 +628,13 @@ struct WaveformScrubberBar: View {
                         .onChanged { value in
                             let x = max(0, min(value.location.x, width - 1))
                             let bar = Int((x / width) * CGFloat(barCount))
+                            let albumIndex = barToAlbumIndex[min(bar, barCount - 1)]
                             isHighlightActive = true
                             dragActiveBar = bar
                             withAnimation(.easeInOut(duration: 0.15)) { showLabel = true }
+                            onSelect(albumIndex)
                             onUserInteraction?()
+                            onRapidScrub?()
                         }
                         .onEnded { value in
                             let x = max(0, min(value.location.x, width - 1))
@@ -623,6 +658,24 @@ struct WaveformScrubberBar: View {
                             }
                         }
                 )
+                // Floating year label above the highlighted bar
+                if isRapidTransition, albums.indices.contains(barToAlbumIndex[highlightBar]) {
+                    let album = albums[barToAlbumIndex[highlightBar]]
+                    let labelX = barSpacing * CGFloat(highlightBar) + barSpacing / 2
+                    VStack(spacing: 0) {
+                        Text(String(album.year))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .transition(.opacity)
+                            .animation(.easeInOut(duration: 0.32), value: album.year)
+                        Spacer().frame(height: 8)
+                    }
+                    .fixedSize()
+                    .position(x: labelX, y: -20)
+                    .id(album.year)
+                }
             }
         }
     }
