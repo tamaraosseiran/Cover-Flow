@@ -49,20 +49,28 @@ class SpotifyService: ObservableObject {
         let items: [SpotifyAlbum]
     }
     
+    private let idleMinHeight: CGFloat = 16
+    private let idleMaxHeight: CGFloat = 18
+    private let activeMinHeight: CGFloat = 20
+    private let activeMaxHeight: CGFloat = 22
+    private let idleMinWidth: CGFloat = 2
+    private let idleMaxWidth: CGFloat = 3
+    private let activeMinWidth: CGFloat = 2.5
+    private let activeMaxWidth: CGFloat = 3.5
+    
     func fetchIndieRockAlbums() async {
         isLoading = true
         errorMessage = nil
         albums = []
-        let indieRockArtists = [
-            "Arctic Monkeys", "Tame Impala", "The Strokes", "The Killers", "Florence + The Machine",
-            "Vampire Weekend", "The 1975", "Foals", "The National", "Arcade Fire"
+        let artists = [
+            "David Bowie"
         ]
         do {
             if accessToken == nil {
                 try await getAccessToken()
             }
             var allAlbums: [Album] = []
-            for artistName in indieRockArtists {
+            for artistName in artists {
                 let artistId = try await fetchArtistId(for: artistName)
                 print("[DEBUG] Artist: \(artistName), ID: \(artistId ?? "not found")")
                 if let artistId = artistId {
@@ -71,9 +79,8 @@ class SpotifyService: ObservableObject {
                     allAlbums.append(contentsOf: albums)
                 }
             }
-            // Shuffle and limit to 30
-            allAlbums.shuffle()
-            self.albums = Array(allAlbums.prefix(30))
+            // Sort by year descending (newest first), no limit
+            self.albums = allAlbums.sorted { $0.year > $1.year }
             print("[DEBUG] Total albums loaded: \(self.albums.count)")
         } catch {
             print("Error fetching indie rock albums: \(error)")
@@ -94,7 +101,7 @@ class SpotifyService: ObservableObject {
     }
     
     private func fetchAlbums(for artistId: String) async throws -> [Album] {
-        let url = URL(string: "https://api.spotify.com/v1/artists/\(artistId)/albums?include_groups=album,single&market=US&limit=20")!
+        let url = URL(string: "https://api.spotify.com/v1/artists/\(artistId)/albums?include_groups=album,single&market=US&limit=35")!
         var request = URLRequest(url: url)
         request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
         let (data, _) = try await URLSession.shared.data(for: request)

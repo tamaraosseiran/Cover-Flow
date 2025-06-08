@@ -34,6 +34,9 @@ struct ContentView: View {
     @State private var scrubberHighlightOffset: Int = 0
     @State private var scrubberHighlightResetTask: DispatchWorkItem?
     @State private var albumColors: [String: UIImageColors] = [:]
+    @State private var animateGradient = false
+    @State private var gradientAngle: Double = 0
+    @State private var albumTilt: CGSize = .zero
 
     var body: some View {
         ZStack {
@@ -45,12 +48,19 @@ struct ContentView: View {
                     return [Color.black.opacity(0.8), Color.black]
                 }
             }()
+            // Map tilt to gradient direction and hue
+            let tiltX = albumTilt.width.clamped(to: -1...1)
+            let tiltY = albumTilt.height.clamped(to: -1...1)
+            let startPoint = UnitPoint(x: 0.5 - tiltX * 0.18, y: 0.0 + tiltY * 0.12)
+            let endPoint = UnitPoint(x: 0.5 + tiltX * 0.18, y: 1.0 - tiltY * 0.12)
             LinearGradient(
                 colors: gradientColors,
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: startPoint,
+                endPoint: endPoint
             )
-            .animation(.easeInOut(duration: 0.7), value: gradientColors)
+            .hueRotation(.degrees(gradientAngle + tiltX * 10))
+            .animation(.easeInOut(duration: 0.5), value: albumTilt)
+            .animation(.easeInOut(duration: 6).repeatForever(autoreverses: true), value: animateGradient)
             .ignoresSafeArea()
             
             Color.black.opacity(0.3).ignoresSafeArea()
@@ -73,87 +83,77 @@ struct ContentView: View {
             }
             
             VStack(spacing: 0) {
-                if spotifyService.isLoading {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                        .frame(height: 400)
-                        .padding(.top)
-                } else if let errorMessage = spotifyService.errorMessage {
-                    Text("Error: \(errorMessage)")
-                        .foregroundColor(.red)
-                        .padding()
-                        .frame(height: 400)
-                        .padding(.top)
-                } else if spotifyService.albums.isEmpty {
-                    Text("No albums found.")
-                        .foregroundColor(.white)
-                        .padding()
-                        .frame(height: 400)
-                        .padding(.top)
-                } else {
-                    // Cover Flow carousel with advanced snap effect
-                    CoverFlowView(
-                        albums: spotifyService.albums,
-                        selectedAlbum: $selectedAlbum,
-                        onUserInteraction: {
-                            activateScrubber()
-                        },
-                        onScroll: { direction in
-                            updateScrubberHighlightOffset(direction)
-                        }
-                    )
-                        .frame(height: 400)
-                        .padding(.top)
-                }
-                
                 Spacer()
-                
-                // Fixed-height album info at the bottom
-                Group {
-                    if let selected = selectedAlbum {
-                        VStack(spacing: 8) {
-                            Text(selected.title)
-                                .font(.title)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                            Text(selected.artist)
-                                .font(.title2)
-                                .foregroundColor(.white.opacity(0.7))
-                            Text(String(selected.year))
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
+                VStack(spacing: 0) {
+                    if spotifyService.isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            .frame(height: 350)
+                    } else if let errorMessage = spotifyService.errorMessage {
+                        Text("Error: \(errorMessage)")
+                            .foregroundColor(.red)
+                            .padding()
+                            .frame(height: 350)
+                    } else if spotifyService.albums.isEmpty {
+                        Text("No albums found.")
+                            .foregroundColor(.white)
+                            .padding()
+                            .frame(height: 350)
                     } else {
-                        VStack { Text(" ") }
+                        // Cover Flow carousel with advanced snap effect
+                        CoverFlowView(
+                            albums: spotifyService.albums,
+                            selectedAlbum: $selectedAlbum,
+                            onUserInteraction: {
+                                activateScrubber()
+                            },
+                            onScroll: { direction in
+                                updateScrubberHighlightOffset(direction)
+                            },
+                            onAlbumTilt: { tilt in
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    albumTilt = tilt
+                                }
+                            }
+                        )
+                        .frame(height: 350)
+                        // Album info close below the album cover
+                        if let selected = selectedAlbum {
+                            VStack(spacing: 8) {
+                                Text(selected.title.replacingOccurrences(of: "\\s*\\([^)]*\\)", with: "", options: .regularExpression))
+                                    .font(.title)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .multilineTextAlignment(.center)
+                                Text(selected.artist)
+                                    .font(.title2)
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text(String(selected.year))
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            .padding(.top, 6)
+                        }
                     }
                 }
-                .frame(height: 120)
-                .frame(maxWidth: .infinity)
-                .background(Color.black.opacity(0.001))
-                .padding(.bottom, 8)
-                
+                Spacer()
                 // Scrubber bar (always visible, animates between idle and active)
                 WaveformScrubberBar(
                     albums: spotifyService.albums,
                     selectedIndex: selectedAlbum.flatMap { album in spotifyService.albums.firstIndex(where: { $0.id == album.id }) } ?? 0,
                     onSelect: { index in
-                        // Calculate the offset between the selected album and the center bar
-                        let centerBar = 25 / 2 // barCount is 25
-                        let offset = index - centerBar
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            scrubberHighlightOffset = offset.clamped(to: -5...5)
-                        }
                         NotificationCenter.default.post(name: .scrubberJumpToIndex, object: index)
                         activateScrubber()
                     },
                     onUserInteraction: {
                         activateScrubber()
                     },
-                    isActive: isScrubberActive,
-                    highlightOffset: scrubberHighlightOffset
+                    isActive: isScrubberActive
                 )
-                .frame(height: 40)
-                .padding(.bottom, 18)
+                .frame(height: 24)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 32)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.3)
@@ -168,10 +168,17 @@ struct ContentView: View {
                 await spotifyService.fetchIndieRockAlbums()
                 print("[DEBUG] After fetch. Album count: \(spotifyService.albums.count)")
             }
+            animateGradient = true
+            withAnimation(.linear(duration: 18).repeatForever(autoreverses: true)) {
+                gradientAngle = 30
+            }
         }
         .onChange(of: selectedAlbum) { _, newValue in
             guard let album = newValue else { return }
             extractColors(for: album)
+            withAnimation(.easeInOut(duration: 1.2)) {
+                gradientAngle += 60
+            }
         }
     }
     
@@ -182,12 +189,8 @@ struct ContentView: View {
             isScrubberActive = true
         }
         let task = DispatchWorkItem {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            withAnimation(.spring(response: 0.8, dampingFraction: 0.85)) {
                 isScrubberActive = false
-            }
-            // After scrubber is inactive, animate highlight back to center
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                scrubberHighlightOffset = 0
             }
         }
         scrubberActiveTask = task
@@ -220,6 +223,7 @@ struct CoverFlowView: View {
     @Binding var selectedAlbum: Album?
     var onUserInteraction: (() -> Void)? = nil
     var onScroll: ((Int) -> Void)? = nil
+    var onAlbumTilt: ((CGSize) -> Void)? = nil
     @State private var selectedIndex: Int = 0
     @State private var scrollOffset: CGFloat = 0
     @GestureState private var dragOffset: CGFloat = 0
@@ -242,13 +246,20 @@ struct CoverFlowView: View {
                         let itemCenter = xPosition - scrollOffset + itemWidth / 2
                         let distance = (itemCenter - center) / (itemWidth + itemSpacing)
                         let rotation = -Double(distance) * maxRotation
-                        let scale = selectedIndex == index ? 1.15 + 0.05 * abs(dragOffset / 100) : max(minScale, 1.0 - abs(distance) * 0.2)
+                        let scale = selectedIndex == index ? 1.25 + 0.05 * abs(dragOffset / 100) : max(minScale, 1.0 - abs(distance) * 0.2)
                         let opacity = max(minOpacity, 1.0 - abs(distance) * 0.3)
                         let isFocused = selectedIndex == index
                         let tilt = isFocused ? Double(dragOffset / 12).clamped(to: -maxTilt...maxTilt) : rotation
                         let parallax = isFocused ? (dragOffset / 4).clamped(to: -maxParallax...maxParallax) : 0
                         let anchor: UnitPoint = .center
-                        AlbumCoverView(album: albums[index], parallax: parallax, isFocused: isFocused)
+                        AlbumCoverView(
+                            album: albums[index],
+                            parallax: parallax,
+                            isFocused: isFocused,
+                            onTilt: { tilt in
+                                if isFocused { onAlbumTilt?(tilt) }
+                            }
+                        )
                             .frame(width: itemWidth, height: 200)
                             .scaleEffect(scale)
                             .opacity(opacity)
@@ -344,6 +355,7 @@ struct AlbumCoverView: View {
     let album: Album
     var parallax: CGFloat = 0
     var isFocused: Bool = false
+    var onTilt: ((CGSize) -> Void)? = nil
     // For interactive tilt
     @State private var dragOffset: CGSize = .zero
     @GestureState private var isDragging: Bool = false
@@ -363,6 +375,10 @@ struct AlbumCoverView: View {
         let normY: Double = viewSize.height > 0 ? Double((dragOffset.height / (viewSize.height / 2)).clamped(to: -1...1)) : 0
         let xTilt = normX * maxTilt
         let yTilt = -normY * maxTilt
+        // Dynamic shadow based on tilt
+        let tiltAmount = min(1.0, sqrt(normX * normX + normY * normY))
+        let dynamicShadowRadius = 32 + tiltAmount * 16
+        let dynamicShadowOpacity = 0.22 + tiltAmount * 0.18
         // Calculate glow position and intensity
         let glowStrength = min(1.0, sqrt(normX * normX + normY * normY))
         let glowOffsetX = CGFloat(normX) * 60
@@ -411,7 +427,12 @@ struct AlbumCoverView: View {
             }
         }
         .frame(width: 240, height: 240)
-        .shadow(color: Color.black.opacity(0.22), radius: 32, x: 0, y: 8)
+        .shadow(
+            color: Color.black.opacity(dynamicShadowOpacity),
+            radius: dynamicShadowRadius,
+            x: -xTilt * 1.2,
+            y: -yTilt * 1.2 + 8
+        )
         .overlay(
             LinearGradient(
                 gradient: Gradient(colors: [Color.clear, Color.black.opacity(0.18)]),
@@ -443,11 +464,16 @@ struct AlbumCoverView: View {
                 .updating($isDragging) { _, state, _ in state = true }
                 .onChanged { value in
                     dragOffset = value.translation
+                    // Notify parent of tilt here
+                    let normX = viewSize.width > 0 ? Double((value.translation.width / (viewSize.width / 2)).clamped(to: -1...1)) : 0
+                    let normY = viewSize.height > 0 ? Double((value.translation.height / (viewSize.height / 2)).clamped(to: -1...1)) : 0
+                    onTilt?(CGSize(width: normX, height: normY))
                 }
                 .onEnded { _ in
                     withAnimation(.interpolatingSpring(stiffness: 180, damping: 18)) {
                         dragOffset = .zero
                     }
+                    onTilt?(.zero)
                 }
             : nil
         )
@@ -479,7 +505,7 @@ struct AlbumCoverView: View {
         .environment(\.modelContext, context)
 }
 
-// MARK: - WaveformScrubberBar
+// ScrubberBar
 
 struct WaveformScrubberBar: View {
     let albums: [Album]
@@ -487,20 +513,19 @@ struct WaveformScrubberBar: View {
     let onSelect: (Int) -> Void
     var onUserInteraction: (() -> Void)? = nil
     var isActive: Bool = false
-    var highlightOffset: Int = 0
-    private let barCount: Int = 25
-    private let idleMinHeight: CGFloat = 8
+    private let barCount: Int = 28
+    private let idleMinHeight: CGFloat = 16
     private let idleMaxHeight: CGFloat = 18
     private let idleMinOpacity: Double = 0.12
     private let idleMaxOpacity: Double = 0.22
-    private let idleMinWidth: CGFloat = 1.5
-    private let idleMaxWidth: CGFloat = 3.5
-    private let activeMinHeight: CGFloat = 14
-    private let activeMaxHeight: CGFloat = 28
+    private let idleMinWidth: CGFloat = 2
+    private let idleMaxWidth: CGFloat = 3
+    private let activeMinHeight: CGFloat = 20
+    private let activeMaxHeight: CGFloat = 22
     private let activeMinOpacity: Double = 0.22
     private let activeMaxOpacity: Double = 0.7
     private let activeMinWidth: CGFloat = 2.5
-    private let activeMaxWidth: CGFloat = 6
+    private let activeMaxWidth: CGFloat = 3.5
     @GestureState private var dragBar: Int? = nil
     @State private var dragActiveBar: Int? = nil
     @State private var animatingToCenter = false
@@ -510,34 +535,19 @@ struct WaveformScrubberBar: View {
     
     var body: some View {
         let count = albums.count
-        let centerBar = barCount / 2
-        // During drag or animation, highlight follows dragActiveBar; otherwise, it's centered
-        let highlightBar = dragActiveBar ?? (centerBar + highlightOffset)
-        // Compute the first album index shown in the waveform
-        let focusIndex = dragBar ?? selectedIndex
-        let minFirst = 0
-        let maxFirst = max(0, count - barCount)
-        // If dragging or animating, shift the waveform so the highlight is under the finger/animating bar
-        let firstAlbumIndex: Int = {
-            if let dragBar = dragActiveBar {
-                // Keep the highlighted bar under the finger or animating
-                return min(max(focusIndex - dragBar, minFirst), maxFirst)
-            } else {
-                // Centered
-                return min(max(focusIndex - centerBar, minFirst), maxFirst)
-            }
-        }()
+        // Map each bar to a proportional album index
         let barToAlbumIndex: [Int] = (0..<barCount).map { bar in
-            let idx = firstAlbumIndex + bar
-            return min(max(idx, 0), count - 1)
+            Int(round(Double(bar) / Double(barCount - 1) * Double(count - 1)))
         }
+        // The highlight bar is the one whose mapped album index matches selectedIndex
+        let highlightBar = barToAlbumIndex.firstIndex(of: selectedIndex) ?? 0
         let minHeight = isActive ? activeMinHeight : idleMinHeight
         let maxHeight = isActive ? activeMaxHeight : idleMaxHeight
         let minWidth = isActive ? activeMinWidth : idleMinWidth
         let maxWidth = isActive ? activeMaxWidth : idleMaxWidth
         GeometryReader { geo in
             let width = geo.size.width
-            let barSpacing = width / CGFloat(barCount)
+            let barSpacing = width / CGFloat(barCount - 1)
             ZStack(alignment: .bottomLeading) {
                 ForEach(0..<barCount, id: \ .self) { bar in
                     let albumIndex = barToAlbumIndex[bar]
@@ -573,7 +583,7 @@ struct WaveformScrubberBar: View {
                             onUserInteraction?()
                         }
                 }
-                .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .center)
+                .frame(maxWidth: .infinity, maxHeight: maxHeight, alignment: .bottom)
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
@@ -600,7 +610,7 @@ struct WaveformScrubberBar: View {
                             // Animate highlight to center
                             animatingToCenter = true
                             withAnimation(.spring(response: 2.0, dampingFraction: 0.8)) {
-                                dragActiveBar = centerBar
+                                dragActiveBar = highlightBar
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                                 dragActiveBar = nil
