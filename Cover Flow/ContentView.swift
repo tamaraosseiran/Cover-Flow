@@ -39,6 +39,11 @@ struct ContentView: View {
     @State private var albumTilt: CGSize = .zero
     @State private var isRapidTransition = false
     @State private var rapidTransitionTask: DispatchWorkItem?
+    @State private var flippedAlbum: Album? = nil
+    @State private var flipAngle: Double = 0
+    @Namespace private var flipNamespace
+    @State private var dragOffset: CGFloat = 0
+    @Namespace private var albumNamespace
 
     var body: some View {
         ZStack {
@@ -116,7 +121,13 @@ struct ContentView: View {
                                 withAnimation(.easeInOut(duration: 0.3)) {
                                     albumTilt = tilt
                                 }
-                            }
+                            },
+                            onSwipeUp: { album in
+                                guard flippedAlbum == nil else { return }
+                                flippedAlbum = album
+                            },
+                            albumNamespace: albumNamespace,
+                            flippedAlbum: $flippedAlbum
                         )
                         .frame(height: 350)
                         // Album info close below the album cover
@@ -175,6 +186,72 @@ struct ContentView: View {
                 .padding(.bottom, 32)
             }
             .ignoresSafeArea(edges: .bottom)
+            
+            // Fullscreen Tracklist Overlay with matchedGeometryEffect
+            if let flipped = flippedAlbum {
+                ZStack {
+                    Color.black.opacity(0.45).ignoresSafeArea().blur(radius: 8)
+                    VStack(spacing: 0) {
+                        // Album cover expands to fullscreen
+                        AsyncImage(url: URL(string: flipped.coverImage)) { image in
+                            image.resizable().aspectRatio(contentMode: .fit)
+                        } placeholder: {
+                            Color.gray.opacity(0.2)
+                        }
+                        .matchedGeometryEffect(id: flipped.id, in: albumNamespace)
+                        .frame(width: 220, height: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .padding(.top, 48)
+                        Text(flipped.title)
+                            .font(.title2).fontWeight(.bold).foregroundColor(.white).padding(.top, 8)
+                        Text("\(flipped.artist) • \(flipped.year)")
+                            .font(.subheadline).foregroundColor(.white.opacity(0.7)).padding(.bottom, 8)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 16) {
+                                ForEach(1...10, id: \.self) { i in
+                                    HStack {
+                                        Text("Track \(i)")
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                        Image(systemName: "play.fill").foregroundColor(.white.opacity(0.7))
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+                        .frame(maxHeight: 320)
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                                    flippedAlbum = nil
+                                }
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .padding()
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.85).ignoresSafeArea())
+                    .transition(.asymmetric(insertion: .opacity.combined(with: .scale), removal: .opacity))
+                    .zIndex(100)
+                    .gesture(
+                        DragGesture(minimumDistance: 20)
+                            .onEnded { value in
+                                if value.translation.height > 80 {
+                                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                                        flippedAlbum = nil
+                                    }
+                                }
+                            }
+                    )
+                }
+            }
         }
         .onAppear {
             print("[DEBUG] On appear. Current album count: \(spotifyService.albums.count)")
@@ -254,6 +331,9 @@ struct CoverFlowView: View {
     var onUserInteraction: (() -> Void)? = nil
     var onScroll: ((Int) -> Void)? = nil
     var onAlbumTilt: ((CGSize) -> Void)? = nil
+    var onSwipeUp: ((Album) -> Void)? = nil
+    var albumNamespace: Namespace.ID
+    @Binding var flippedAlbum: Album?
     @State private var selectedIndex: Int = 0
     @State private var scrollOffset: CGFloat = 0
     @GestureState private var dragOffset: CGFloat = 0
@@ -298,19 +378,27 @@ struct CoverFlowView: View {
                                 axis: (x: 0, y: 1, z: 0),
                                 anchor: anchor
                             )
-                            .zIndex(-abs(distance))
-                            .onTapGesture {
-                                withAnimation(.interactiveSpring(response: 0.5, dampingFraction: 0.8, blendDuration: 0.7)) {
-                                    let targetOffset = CGFloat(index) * (itemWidth + itemSpacing)
-                                    scrollOffset = targetOffset
-                                    selectedIndex = index
-                                    if albums.indices.contains(index) {
-                                        selectedAlbum = albums[index]
+                            .zIndex(isFocused ? 1 : 0)
+                            .contentShape(Rectangle())
+                            .highPriorityGesture(
+                                TapGesture().onEnded {
+                                    print("Tapped album \(index), isFocused: \(isFocused)")
+                                    if isFocused {
+                                        onSwipeUp?(albums[index])
+                                    } else {
+                                        withAnimation(.interactiveSpring(response: 0.5, dampingFraction: 0.8, blendDuration: 0.7)) {
+                                            let targetOffset = CGFloat(index) * (itemWidth + itemSpacing)
+                                            scrollOffset = targetOffset
+                                            selectedIndex = index
+                                            if albums.indices.contains(index) {
+                                                selectedAlbum = albums[index]
+                                            }
+                                            triggerHaptic()
+                                            onUserInteraction?()
+                                        }
                                     }
-                                    triggerHaptic()
-                                    onUserInteraction?()
                                 }
-                            }
+                            )
                     }
                 }
                 .padding(.horizontal, (geometry.size.width - itemWidth) / 2)
@@ -698,6 +786,24 @@ extension Notification.Name {
 }
 
 #if DEBUG
+struct PreviewWrapper: View {
+    let dummyAlbums: [Album]
+    @Namespace var previewNamespace
+    var body: some View {
+        CoverFlowView(
+            albums: dummyAlbums,
+            selectedAlbum: .constant(dummyAlbums[3]),
+            onUserInteraction: {},
+            onScroll: { _ in },
+            onAlbumTilt: { _ in },
+            onSwipeUp: { _ in },
+            albumNamespace: previewNamespace,
+            flippedAlbum: .constant(dummyAlbums[3])
+        )
+        .frame(height: 400)
+        .padding()
+    }
+}
 struct ContentView_Previews: PreviewProvider {
     static var previews: some View {
         let dummyAlbums = (0..<10).map { i in
@@ -713,9 +819,7 @@ struct ContentView_Previews: PreviewProvider {
         WaveformScrubberBar(albums: dummyAlbums, selectedIndex: 3, onSelect: { _ in })
             .frame(height: 56)
             .padding()
-        CoverFlowView(albums: dummyAlbums, selectedAlbum: .constant(dummyAlbums[3]))
-            .frame(height: 400)
-            .padding()
+        PreviewWrapper(dummyAlbums: dummyAlbums)
     }
 }
 #endif
