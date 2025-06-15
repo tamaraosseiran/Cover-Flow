@@ -44,6 +44,8 @@ struct ContentView: View {
     @Namespace private var flipNamespace
     @State private var dragOffset: CGFloat = 0
     @Namespace private var albumNamespace
+    @State private var isExpanding: Bool = false
+    @State private var isShowingTracks: Bool = false
 
     var body: some View {
         ZStack {
@@ -190,62 +192,138 @@ struct ContentView: View {
             // Fullscreen Tracklist Overlay with matchedGeometryEffect
             if let flipped = flippedAlbum {
                 ZStack {
-                    Color.black.opacity(0.45).ignoresSafeArea().blur(radius: 8)
+                    // Background blur that intensifies during transition
+                    Color.black.opacity(0.45)
+                        .ignoresSafeArea()
+                        .blur(radius: 8)
+                        .animation(.easeInOut(duration: 0.4), value: flipped)
+                    
                     VStack(spacing: 0) {
-                        // Album cover expands to fullscreen
+                        // Album cover that first expands to fill the screen
                         AsyncImage(url: URL(string: flipped.coverImage)) { image in
                             image.resizable().aspectRatio(contentMode: .fit)
                         } placeholder: {
                             Color.gray.opacity(0.2)
                         }
                         .matchedGeometryEffect(id: flipped.id, in: albumNamespace)
-                        .frame(width: 220, height: 220)
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .padding(.top, 48)
-                        Text(flipped.title)
-                            .font(.title2).fontWeight(.bold).foregroundColor(.white).padding(.top, 8)
-                        Text("\(flipped.artist) • \(flipped.year)")
-                            .font(.subheadline).foregroundColor(.white.opacity(0.7)).padding(.bottom, 8)
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 16) {
-                                ForEach(1...10, id: \.self) { i in
-                                    HStack {
-                                        Text("Track \(i)")
-                                            .foregroundColor(.white)
-                                        Spacer()
-                                        Image(systemName: "play.fill").foregroundColor(.white.opacity(0.7))
-                                    }
-                                    .padding(.horizontal)
+                        .frame(
+                            width: isExpanding ? UIScreen.main.bounds.width * 0.95 : 220,
+                            height: isExpanding ? UIScreen.main.bounds.width * 0.95 : 220
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: isExpanding ? 32 : 24, style: .continuous))
+                        .padding(.top, isExpanding ? 32 : 48)
+                        .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+                        .onAppear {
+                            // Start the expansion animation
+                            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                isExpanding = true
+                            }
+                            // After expansion, show the tracks
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                    isShowingTracks = true
                                 }
                             }
-                            .padding(.top, 8)
                         }
-                        .frame(maxHeight: 320)
+                        
+                        if isShowingTracks {
+                            // Album info that fades in
+                            VStack(spacing: 8) {
+                                Text(flipped.title)
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                Text("\(flipped.artist) • \(flipped.year)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            .padding(.vertical, 16)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            
+                            // Track list that emerges from the expanded album
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    ForEach(1...10, id: \.self) { i in
+                                        HStack {
+                                            Text("Track \(i)")
+                                                .foregroundColor(.white)
+                                            Spacer()
+                                            Image(systemName: "play.fill")
+                                                .foregroundColor(.white.opacity(0.7))
+                                        }
+                                        .padding(.horizontal)
+                                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                    }
+                                }
+                                .padding(.top, 8)
+                            }
+                            .frame(maxHeight: 320)
+                            .background(
+                                // Subtle gradient overlay for depth
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color.black.opacity(0.0),
+                                        Color.black.opacity(0.1)
+                                    ]),
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                        }
+                        
                         Spacer()
+                        
+                        // Close button with blur background
                         HStack {
                             Spacer()
                             Button(action: {
-                                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                                    flippedAlbum = nil
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                    isShowingTracks = false
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                        isExpanding = false
+                                        flippedAlbum = nil
+                                    }
                                 }
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 28))
                                     .foregroundColor(.white.opacity(0.85))
                                     .padding()
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
                             }
                         }
+                        .padding(.bottom, 32)
+                        .opacity(isShowingTracks ? 1 : 0)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.85).ignoresSafeArea())
-                    .transition(.asymmetric(insertion: .opacity.combined(with: .scale), removal: .opacity))
+                    .background(
+                        // Glass-like background with depth
+                        Color.black.opacity(0.85)
+                            .background(.ultraThinMaterial)
+                            .ignoresSafeArea()
+                    )
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.combined(with: .scale(scale: 1.02)),
+                            removal: .opacity.combined(with: .scale(scale: 0.98))
+                        )
+                    )
                     .zIndex(100)
                     .gesture(
                         DragGesture(minimumDistance: 20)
                             .onEnded { value in
                                 if value.translation.height > 80 {
-                                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                                        flippedAlbum = nil
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                                        isShowingTracks = false
+                                    }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                        withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                            isExpanding = false
+                                            flippedAlbum = nil
+                                        }
                                     }
                                 }
                             }
